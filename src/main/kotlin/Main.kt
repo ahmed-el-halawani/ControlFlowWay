@@ -1,8 +1,39 @@
+import java.lang.Exception
 import java.util.*
 
 fun main(args: Array<String>) {
 //    println("Hello World!")
-    ccx()
+//    ccx()
+
+
+
+    val controller = GraphControlFlow(1)
+        .flowBuilder()
+        .setOnError("") {
+
+        }
+        .setOnTerminate("") {
+
+        }
+        .then("then 1") {
+            println("1")
+        }
+        .then("then 1") {
+            println("1")
+        }
+        .thenAndNext("then 2") {
+            println("2")
+        }.whenCondition {
+            println("default when")
+        }.case("case 1", { false }) {
+            it.thenAndNext("1") {
+                println("case 1 then 1")
+            }
+        }.case("case 2", { true }) {
+            it.thenAndNext("1") {
+                println("case2 then1")
+            }
+        }.build()
 
 
 }

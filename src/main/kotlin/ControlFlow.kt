@@ -1,84 +1,161 @@
-class ControlFlow() {
+import java.util.LinkedList
+import java.util.Queue
 
-    var logger: (String) -> Unit = { }
-
-    constructor(logger: (String) -> Unit) : this() {
+class ControlFlow<T>(val prop: T, var logger: (String) -> Unit) {
+    constructor(prop: T) : this(prop, {}) {
         this.logger = logger
     }
 
-    fun flowBuilder(): FlowStep<Unit> {
-        return FlowStep {}
+    val controller: Controller = Controller()
+
+    fun flowBuilder(): StepperMaker {
+        return StepperMaker()
     }
 
-    inner class FlowStep<T>(val nextActionA: () -> T) {
 
-        fun <R> then(nextAction: (T?) -> R): FlowStep<R> {
+    inner class Controller() {
+        fun next() {
+            stepsQueue.poll()?.doStep()
+        }
+
+        fun terminate() {
+            terminateCallback?.doStep()
+        }
+
+        fun error(throwable: Throwable) {
+            errorStepCallback?.doStep()
+        }
+    }
+
+    inner class StepperMaker {
+
+        fun setOnTerminate(stepTitle: String?, nextAction: (T?) -> Unit): StepperMaker {
+            terminateCallback = FlowStep(stepTitle, nextAction)
+            return this;
+        }
+
+        fun setOnError(stepTitle: String?, nextAction: (T?) -> Unit): StepperMaker {
+            errorStepCallback = FlowStep(stepTitle, nextAction)
+            return this;
+        }
+
+        fun whenCondition(nextDefaultAction: (T?) -> Unit): ConditionStep {
+            return whenCondition(null, nextDefaultAction);
+        }
+
+        fun whenCondition(startConditionTitle: String?, nextDefaultAction: (T?) -> Unit): ConditionStep {
+            val condition = ConditionStep(this, startConditionTitle, nextDefaultAction)
+            stepsQueue.add(condition)
+            return condition;
+        }
+
+        fun whenConditionAndNext(startConditionTitle: String?, nextDefaultAction: (T?) -> Unit): ConditionStep {
+            val condition = ConditionStep(this, startConditionTitle, nextDefaultAction)
+            stepsQueue.add(condition)
+            return condition;
+        }
+
+        fun then(nextAction: (T?) -> Unit): StepperMaker {
             return then(null, nextAction)
         }
 
-        fun <R> then(stepTitle: String?, nextAction: (T?) -> R): FlowStep<R> {
-            return FlowStep {
-                val nextActionOut = nextAction(nextActionA());
-                stepTitle?.let { logger("$it ,data: ${nextActionOut?.toString() ?: "null"}") }
-                nextActionOut
+        fun then(stepTitle: String?, nextAction: (T?) -> Unit): StepperMaker {
+            stepsQueue.add(FlowStep(stepTitle) {
+                nextAction(prop)
+            })
+            return this;
+        }
+
+        fun thenAndNext(stepTitle: String?, nextAction: (T?) -> Unit): StepperMaker {
+            stepsQueue.add(FlowStep(stepTitle, isAndNext = true) {
+                nextAction(prop)
+            })
+            return this;
+        }
+
+        fun build() = controller
+    }
+
+    inner class FlowStep(private val description: String?, val isAndNext: Boolean = false, val action: (T?) -> Unit) :
+        Stepper {
+
+        constructor(action: (T?) -> Unit) : this(null, false, action)
+        constructor(description: String?, action: (T?) -> Unit) : this(description, false, action)
+
+        override fun doStep() {
+            action(prop)
+            description?.let { logger("$it ,data: ${prop?.toString() ?: "null"}") }
+            if (isAndNext) {
+                controller.next()
             }
         }
 
-        fun build() {
-            nextActionA()
+
+    }
+
+    open inner class ConditionStep(
+        private val stepperMaker: StepperMaker,
+        private val startConditionTitle: String?,
+        val nextDefaultAction: (T?) -> Unit
+    ) :
+        Stepper {
+        var isAndNext: Boolean = false
+        private var endConditionTitle: String? = null
+
+        private val flowSteps: ArrayList<(T?) -> Unit?> = ArrayList();
+
+        fun case(condition: (T?) -> Boolean, nextAction: (T?) -> Unit): ConditionStep {
+            return case(null, condition, nextAction);
         }
 
-        fun <R> whenCondition(nextDefaultAction: (T?) -> R?): ConditionStep<T, R> {
-            return whenCondition(null, nextDefaultAction)
+        fun case(caseTitle: String?, condition: (T?) -> Boolean, nextAction: (T?) -> Unit): ConditionStep {
+            flowSteps.add { mData ->
+                val nextActionOut = nextAction(mData);
+                if (condition(mData)) {
+                    caseTitle?.let { logger("$it, data: $prop") }
+                    nextActionOut
+                } else null
+            };
+
+            return this
+
         }
 
-        fun <R> whenCondition(startConditionTitle: String?, nextDefaultAction: (T?) -> R?): ConditionStep<T, R> {
-            return ConditionStep(startConditionTitle, nextDefaultAction) { nextActionA() }
+        fun endCondition(): StepperMaker {
+            return endCondition(null);
         }
 
+        fun endCondition(endConditionTitle: String?): StepperMaker {
+            this.endConditionTitle = endConditionTitle;
+            return stepperMaker;
+        }
 
-        inner class ConditionStep<T, R>(
-            private val startConditionTitle: String?,
-            val nextDefaultAction: (T?) -> R?,
-            val data: () -> T?
-        ) {
+        fun endConditionAndNext(): StepperMaker {
+            this.isAndNext = true
+            return endCondition()
+        }
 
-            private val flowSteps: ArrayList<(T?) -> R?> = ArrayList();
+        fun endConditionAndNext(endConditionTitle: String?): StepperMaker {
+            this.isAndNext = true
+            return endCondition(endConditionTitle)
+        }
 
-            fun case(condition: (T?) -> Boolean, nextAction: (T?) -> R): ConditionStep<T, R> {
-                return case(null, condition, nextAction);
-            }
-
-            fun case(caseTitle: String?, condition: (T?) -> Boolean, nextAction: (T?) -> R): ConditionStep<T, R> {
-                flowSteps.add { mData ->
-                    val nextActionOut = nextAction(mData);
-                    if (condition(mData)) {
-                        caseTitle?.let { logger("$it, data: $mData") }
-                        nextActionOut
-                    } else
-                        null
-                };
-
-                return this
-
-            }
-
-            fun endCondition(): FlowStep<R?> {
-                return endCondition(null)
-            }
-
-            fun endCondition(endTitle: String?): FlowStep<R?> {
-                return FlowStep {
-                    val data = data();
-                    startConditionTitle?.let(logger)
-                    val res = flowSteps.map { it(data) }.firstOrNull { it != null } ?: nextDefaultAction(data)
-                    endTitle?.let { logger("$it, data: $res") }
-                    res
-                };
-            }
-
+        override fun doStep() {
+            startConditionTitle?.let(logger)
+            flowSteps.map { it(prop) }.firstOrNull { it != null } ?: nextDefaultAction(prop)
+            endConditionTitle?.let { logger("$it, data: $prop") }
+            if (isAndNext)
+                controller.next()
         }
 
     }
 
+
+    private interface Stepper {
+        fun doStep()
+    }
+
+    private val stepsQueue: Queue<Stepper> = LinkedList()
+    private var errorStepCallback: Stepper? = null;
+    private var terminateCallback: Stepper? = null;
 }

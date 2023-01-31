@@ -46,7 +46,6 @@ class GraphControlFlow<T>(val prop: T, var logger: (String) -> Unit) {
         fun addStep(stepper: Stepper) {
             currentStep.nextStep = stepper
             currentStep = stepper
-            stepsQueue.add(stepper)
         }
 
         fun setOnTerminate(stepTitle: String?, nextAction: (T?) -> Unit): StepperMaker {
@@ -170,7 +169,6 @@ class GraphControlFlow<T>(val prop: T, var logger: (String) -> Unit) {
         }
 
     }
-
 
     abstract inner class Stepper {
         var nextStep: Stepper? = null
